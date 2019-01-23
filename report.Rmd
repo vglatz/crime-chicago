@@ -1,0 +1,554 @@
+---
+title: "High crime in Chicago? Let's get down with data"
+author: "Glatz, Vincent"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+<!--
+
+Data file: "Chicago_Crimes_2012_to_2017.csv"
+First choice: https://drive.google.com/file/d/1GBlRJRlPzb0butfIPmpkXTPMyBQvbSNd/view?usp=sharing
+Alternative choice: https://www.kaggle.com/currie32/crimes-in-chicago/data (log in is needed)
+Instructions: The "Chicago_Crimes_2012_to_2017.csv" file should be put in the "data" folder
+
+-->
+
+```{r packages, echo = FALSE, warning = FALSE, message = FALSE}
+
+# Load the packages
+library(knitr)
+library(tidyverse)
+library(scales)
+library(kableExtra)
+library(lubridate)
+library(modelr)
+library(broom)
+library(ggrepel)
+library(forcats)
+library(ggmap)
+library(viridis)
+
+```
+
+```{r data, echo = FALSE, warning = FALSE, message = FALSE}
+
+# Load the data
+chicago_crimes <- read.csv("../data/Chicago_Crimes_2012_to_2017.csv", stringsAsFactors = FALSE)
+
+```
+
+```{r options, echo = FALSE, warning = FALSE, message = FALSE}
+
+# Set the precision to 3 digits
+options(digits=3)
+
+# Remove scientific notation
+options(scipen=999)
+
+# Define html format
+options(knitr.table.format = "html")
+
+# Set theme
+theme_set(theme_light())
+
+# Chunk options
+opts_chunk$set(fig.width = 8, 
+               fig.asp = 0.618, 
+               out.width = "70%",
+               fig.align = "center",
+               fig.show = "hold",
+               warning = FALSE,
+               message = FALSE,
+               echo = FALSE
+               )
+
+```
+
+## Introduction
+
+The inspiration for this project started with this [Reddit post](https://www.reddit.com/r/dataisbeautiful/comments/84joxm/one_year_of_accumulation_of_crime_in_central/). I found the video captivating and it made me want to know more about the data. When doing so, I found that the data is really interesting and had a lot of information to discover. I also really liked the idea of working with a big dataset that is relevant to current problems. My motivation for doing this project is that I know that Chicago has the reputation of being a city that particularly struggles with crimes and I wanted to explore the raw data to see what the reality of the situation is.
+
+The goal of the project is to use Data Science to better understand the crimes in Chicago. The results could help the city of Chicago better understand crime to make the city safer and also to help the public better understand the crime situation with visualizations that are easy to understand.
+
+########################
+In this project, we will try to answer the following questions:
+
+* **What types of crime is there and in what proportion?** "High crime" doesn't mean anything if we don't look closer at the numbers. For example, two cities could have the same number of crimes but the situation would totally different if most of the crime from the first city are small thefts and most of the crimes from the second city are homicides.
+
+* **How has crime evolved over the past few years?** Are the number of crimes going up or down? Have the types of crimes changed over the past few years?
+
+* **What are the areas with most crimes?** **Where do crimes happen?** This data could help the public to be more careful in specific areas. It would also be interesting for the city to particularly focus on these areas with more police forces and more programs to help reduce crime.
+
+* **What types of crime are happening during the different hours of the day?** This data would help the police forces to put more focus on specific crimes depending on the hours. For example, the police forces could do more controls for specific crimes at the hours when these crimes happen the most.
+
+* **What police districts have the most crimes that lead to an arrest?** Is there some big differences between the police districts in term of crimes that lead to an arrest?
+
+* **What is the situation regarding homicides?** Have the number of homicides changed during the last few years?
+
+## Data
+
+The chosen dataset is "Crimes in Chicago" from 2012 to 2017 (23 variables and 1'456'714 observations). The data can be downloaded with the file "Chicago_Crimes_2012_to_2017.csv" from [Kaggle](https://www.kaggle.com/currie32/crimes-in-chicago/data). This data is extracted from the Chicago Police Department's [CLEAR (Citizen Law Enforcement Analysis and Reporting) system](https://data.cityofchicago.org/Public-Safety/Crimes-2001-to-present/ijzp-q8t2).
+
+Here is a description of the variables that we are going to select:
+
+**Case Number** - The Chicago Police Department RD Number (Records Division Number), which is unique to the incident.
+
+**Date** - Date when the incident occurred. this is sometimes a best estimate.
+
+**Block** - The partially redacted address where the incident occurred, placing it on the same block as the actual address.
+
+**Primary Type** - The primary description of the IUCR code.
+
+**Description** - The secondary description of the IUCR code, a subcategory of the primary description.
+
+**Location** Description - Description of the location where the incident occurred.
+
+**Arrest** - Indicates whether an arrest was made.
+
+**District** - Indicates the police district where the incident occurred. See the districts at https://data.cityofchicago.org/d/fthy-xz3r.
+
+**Latitude** - The latitude of the location where the incident occurred. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+**Longitude** - The longitude of the location where the incident occurred. This location is shifted from the actual location for partial redaction but falls on the same block.
+
+The following operations were done on the data:
+
+```{r, echo = TRUE}
+
+# Select the variables
+chicago_crimes <- chicago_crimes %>%
+  select(Case.Number, Date, Block, Primary.Type, Description, Location.Description, Arrest, District, Latitude, Longitude)
+
+# Remove NA values
+chicago_crimes <- chicago_crimes %>% na.omit()
+
+# Step 1 for "Hour": duplicate the date
+chicago_crimes <- chicago_crimes %>% mutate(Hour = Date)
+
+# Step 2 for "Hour": change the format of the date
+chicago_crimes$Hour <- strptime(chicago_crimes$Hour, format = '%m/%d/%Y %I:%M:%S %p')
+
+# Add the "Weekday" value
+chicago_crimes$Weekday <- weekdays(chicago_crimes$Hour)
+
+# Step 3 for "Hour": transform to "Hour"
+chicago_crimes$Hour <- chicago_crimes$Hour$hour
+
+# Rename the date
+chicago_crimes$Date <- chicago_crimes$Date %>% substr(1, 10)
+
+# Change the date format
+chicago_crimes <- chicago_crimes %>% mutate(Date = mdy(Date))
+
+# Add the columns Day/Month/Year
+chicago_crimes <- chicago_crimes %>% mutate(Day = as.integer(day(Date)), Month = as.integer(month(Date)), Year = as.integer(year(Date)))
+
+# Select only 2012 to 2016 (remove 2017)
+chicago_crimes <- chicago_crimes %>% filter(is.element(Year, c(2012:2016)))
+
+```
+
+## Analysis
+
+### Types of crime
+
+```{r}
+
+# Table of the types of crime by the highest number
+chicago_crimes %>%
+  count(Primary.Type) %>%
+  arrange(desc(n)) %>%
+  filter(n > 500) %>%
+  kable(caption = "Types of crime from 2012 to 2016", col.names=c("Types of crime", "Total")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C") %>%
+  row_spec(19, bold = T, color = "#DF7401")
+
+# Barplot of the types of crime by the highest number
+chicago_crimes %>%
+  count(Primary.Type) %>%
+  filter(n > 500) %>%
+  ggplot(aes(reorder(Primary.Type, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of crime from 2012 to 2016") +
+  labs(x = "Types of crime", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,350000), position = "top")
+
+```
+
+We can see that the total number of crimes is very dependent on the type of crime committed. **Theft** and **Battery** are the most frequent type of crime and have huge numbers compared to the rest. We can also note that **Criminal damage** and **Narcotics** have solid numbers. And finally, we can see that one of the most talked type of crime, **Homicide** has a very low number compared to the top types of crime. 
+
+```{r}
+
+# Barplot of the types of THEFT from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "THEFT") %>%
+  count(Description) %>%
+  filter(n > 1000) %>%
+  ggplot(aes(reorder(Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of THEFT from 2012 to 2016") +
+  labs(x = "Types of THEFT", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,150000), position = "top")
+
+```
+
+For the **Theft** category, the thefts of \$500 and under are the most comitted by far. The thefts of over \$500 also have solid numbers. We then have a fair amount of thefts from building and in retail. These proportion are not very surprising to me even though I would not expect that many thefts of over \$500.
+
+```{r}
+
+# Barplot of the types of BATTERY from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "BATTERY") %>%
+  count(Description) %>%
+  filter(n > 1000) %>%
+  ggplot(aes(reorder(Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of BATTERY from 2012 to 2016") +
+  labs(x = "Types of BATTERY", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,150000), position = "top")
+
+```
+
+For the **Battery** category, almost all of them are simple domestic battery and simple battery. This is my first very big surprise, I wasn't expecting at all that many battery crimes in a domestic situation.
+
+```{r}
+
+# Barplot of the types of NARCOTICS from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "NARCOTICS") %>%
+  count(Description) %>%
+  filter(n > 1000) %>%
+  ggplot(aes(reorder(Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of NARCOTICS from 2012 to 2016") +
+  labs(x = "Types of NARCOTICS", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = c(0, 0), limits = c(0,70000), position = "top")
+
+```
+
+For the **Narcotic** category, the most frequent crime is by far the possession of a small amount of cannabis. We then have the possession of heroin and crack that have decent numbers. This is our first very interesting insight for this project: a lot of time and resources are spend for crimes that concern a small amount of cannabis. Knowing that the legalization of cannabis is becoming more and more popular, we can see that the effect of having cannabis legalized in the state of Illinois would have a huge influence for the city of Chicago. Of course, the city of Chicago can't legalize cannabis by itself but they could use their data to put pressure on the state of Illinois to move in the direction for the legalization of cannabis. In the present time (May 2018), the legalization of cannabis in the state of Illinois is actually in debate and might become a reality in a near future.
+
+```{r}
+
+# Barplot of the types of ASSAULT from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "ASSAULT") %>%
+  count(Description) %>%
+  filter(n > 1000) %>%
+  ggplot(aes(reorder(Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of ASSAULT from 2012 to 2016") +
+  labs(x = "Types of ASSAULT", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = c(0, 0), limits = c(0,70000), position = "top")
+
+```
+
+For the **Assault** category, the most frequent crime is by far the simple assault with is the least serious form of assault.
+
+```{r}
+
+# Barplot of the types of ROBBERY from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "ROBBERY") %>%
+  count(Description) %>%
+  filter(n > 1000) %>%
+  ggplot(aes(reorder(Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Types of ROBBERY from 2012 to 2016") +
+  labs(x = "Types of ROBBERY", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = c(0, 0), limits = c(0,30000), position = "top")
+
+```
+
+For the **Robbery** category, we can see that the two most types are the armed robbery with a handgun and the strong arm robbery without a weapon. It is a bit surprising to have that many crimes of strong arm robbery without a weapon.
+
+### Evolution of crime over the past few years
+
+```{r}
+
+# Plot of the number of monthly crimes from 2012 to 2016
+chicago_crimes %>%
+  group_by(Year, Month) %>%
+  count() %>%
+  ggplot(aes(Month, n, group = factor(Year), color = factor(Year))) +
+  geom_line(size = 1) +
+  ggtitle("Number of monthly crimes from 2012 to 2016") +
+  labs(x = "Month", y = "Total", color = "Year") +
+  scale_x_discrete(limits = c(1:12), expand = c(0, 0), labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+First of all, we can easily see that the number of crimes has been **decreasing each year**. This is surprising since I always hear news report about the crime in Chicago but never about how crime has decreased. This is a good reminder to be careful of the biases with selective information. It is very interesting to see that even with decreasing numbers, the number of crimes by month **follows approximately each year the same pattern**. We can see that there are more crimes during the summer around July and less crime in the winter around December-January-February. This is interesting but not a huge surprise since some studies have already linked a correlation between crime and temperature (more crime when it's hot and less crime when it's cold).
+
+```{r}
+
+# Barplot of the evolution of some major types of crime from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type %in% c("ASSAULT", "BATTERY", "BURGLARY", "CRIMINAL DAMAGE", "NARCOTICS", "ROBBERY", "THEFT")) %>%
+  group_by(Year, Primary.Type) %>%                               
+  summarise(total = n()) %>%
+  ggplot(aes(Year, total, fill = Primary.Type)) +
+  geom_bar(stat="identity") +
+  ggtitle("Evolution of some major types of crime from 2012 to 2016") +
+  labs(x = "Year", y = "Total", fill = "Types of crime") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 8), expand = c(0, 0), limits = c(0,275000)) +
+  scale_fill_brewer(palette = "Set2")
+
+```
+
+Here we can the the evolution of some major types of crime between the year 2012 to 2016. We can see that all categories have slightly decreased when comparing 2012 to 2016 (which would confirm that crimes have slightly decreased between the years). We can notice that **Burglary** has **decreased by 50%** from 2012 to 2016 and the biggest change is **Narcotics** that has **decreased by about 80%** from 2012 to 2016.
+
+### Map of crime
+
+```{r}
+
+# Make map 1
+chicago_map <- qmap("chicago", zoom = 11, source = "stamen", maptype = "toner", darken = c(.3,"#BBBBBB"))
+
+# Show map 1
+chicago_map + geom_point(data = chicago_crimes, aes(Longitude, Latitude), color = "dark red", alpha = .01, size = 0.8)
+
+```
+
+Here you can see a map of Chicago with all the crimes.
+
+```{r}
+
+# Make map 2
+chicago_map2 <- get_map("Chicago", zoom = 12, maptype = "satellite")
+
+# Show map 2
+ggmap(chicago_map2) +
+  stat_density2d(data = chicago_crimes, aes(Longitude, Latitude, fill = ..density..), geom = "tile", contour = F, alpha = .5) +
+  scale_fill_viridis(option = "inferno") +
+  labs(title = "Map of the density of the crimes from 2012 to 2016", fill = "Number of\ncrimes") +
+  theme(axis.text = element_blank(), axis.title = element_blank() ,axis.ticks = element_blank())
+
+```
+
+Here you can see a map of Chicago with the density of the crimes. We can see that some areas have a **much higher density of crimes**.
+
+### Where do crimes happen?
+
+```{r}
+
+# Table of the total number of crimes by block
+chicago_crimes %>%
+  count(Block) %>%
+  top_n(7) %>%
+  arrange(desc(n)) %>%
+  kable(caption = "Total number of crimes by block", col.names=c("Block", "Total")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C")
+
+```
+
+We can see that the block **001XX N STATE ST** has a very high number of crimes.
+
+
+```{r}
+
+# Barplot of the number of crimes by location from 2012 to 2016
+chicago_crimes %>%
+  count(Location.Description) %>%
+  top_n(15) %>%
+  ggplot(aes(reorder(Location.Description, n), n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Number of crimes by location from 2012 to 2016") +
+  labs(x = "Location", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,350000), position = "top")
+
+```
+
+We can observe that most crimes happen on the street, the sidewalk, in residence and in apartment. The number of crimes **on the street and the sidewalk** is in part due because of the high number of thefts in these areas. The number of crimes **in residence and in apartment** are related to the very high number of crimes that happen in a domestic situation as we saw previously.
+
+### Hours of the day
+
+```{r}
+
+#Sorting the weekdays
+crimes_hour_weekday <- as.data.frame(table(chicago_crimes$Weekday, chicago_crimes$Hour))
+names(crimes_hour_weekday) <- c('Weekday', 'Hour', 'Frequency')
+crimes_hour_weekday$Hour <- as.numeric(as.character(crimes_hour_weekday$Hour))
+crimes_hour_weekday$Weekday <- factor(crimes_hour_weekday$Weekday, ordered = TRUE, levels = c('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'))
+
+# Heatmap of the total crimes by hour and weekday
+crimes_hour_weekday %>%
+  ggplot(aes(Hour, Weekday, fill = Frequency)) + 
+  geom_tile() +
+  ggtitle("Total crimes by hour and weekday") +
+  scale_fill_gradient(name = 'Total crimes', low = 'white', high = 'red') +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 24), expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+```
+
+We can see that we have a **lot more crime during the night on the weekend**, this is obviously due to people going out and drinking on the weekend. During the week, there isn't much crime during the night. Finally, we can observe that **12am** and **6-7pm** are hours with a particularly high crime.
+
+```{r}
+
+# Barplot of the major types of crime by hour from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type %in% c("ASSAULT", "BATTERY", "BURGLARY", "CRIMINAL DAMAGE", "NARCOTICS", "ROBBERY", "THEFT")) %>%
+  group_by(Hour, Primary.Type) %>%                               
+  summarise(total = n()) %>%
+  ggplot(aes(Hour, total, fill = Primary.Type)) +
+  geom_bar(stat="identity") +
+  ggtitle("Major types of crime by hour from 2012 to 2016") +
+  labs(x = "Hour", y = "Total", fill = "Types of crime") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 24), expand = c(0, 0)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 8), expand = c(0, 0), limits = c(0,70000)) +
+  scale_fill_brewer(palette = "Set2")
+
+```
+
+The proportion of the major types of crimes **doesn't really change by the hour**. All the major types of crimes decreased during the night where there is less crime. The types of crime that changes the most depending on the hour is **Narcotics** which decreases a lot during the night.
+
+
+
+
+### Districts
+
+```{r}
+
+# Table of the total crimes by district
+chicago_crimes %>%
+  count(District) %>%
+  top_n(8) %>%
+  arrange(desc(n)) %>%
+  kable(caption = "Total crimes by district", col.names=c("District number", "Total")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C")
+
+# Barplot of the total crimes by district
+chicago_crimes %>%
+  count(District) %>%
+  top_n(8) %>%
+  ggplot(aes(reorder(District, -n), n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total crimes by district") +
+  labs(x = "District number", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,100000), position = "top")
+
+```
+
+Here we can see the top 8 districts with the most crimes. We can see that the **district 11 has the most crimes** with a total of 99'966 and in second place we have the district 8 with 94'242 crimes.
+
+```{r}
+
+# Table of the total crimes that lead to an arrest by district
+chicago_crimes %>%
+  filter(Arrest == "True") %>%
+  count(District) %>%
+  top_n(8) %>%
+  arrange(desc(n)) %>%
+  kable(caption = "Total crimes that lead to an arrest by district", col.names=c("District number", "Total")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C")
+
+# Barplot of the total crimes that lead to an arrest by district
+chicago_crimes %>%
+  filter(Arrest == "True") %>%
+  count(District) %>%
+  top_n(8) %>%
+  ggplot(aes(reorder(District, -n), n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total crimes that lead to an arrest by district") +
+  labs(x = "District number", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0), limits = c(0,50000), position = "top")
+
+```
+
+Now we can see the top 8 districts with the most crimes that lead to an arrest. It's not a surprise that the **district 11 is also first** since he was the one with the most crimes in the first place. What is more surprising is that the district 8, which had almost the same number of crimes as the district 11, has **only half the crimes** that lead to an arrest than the district 11.
+
+### Homicides
+
+```{r}
+
+# Table of the types of homicide from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "HOMICIDE") %>%
+  count(Description) %>%
+  arrange(desc(n)) %>%
+  kable(caption = "Types of homicide from 2012 to 2016", col.names=c("Types of homicide", "Total")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C")
+
+```
+
+We can see that homicides consist almost all of **first degree murder**.
+
+```{r}
+
+# Barplot of the number of homicides per year from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "HOMICIDE") %>%
+  count(Year) %>%
+  ggplot(aes(Year, n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Number of homicides per year from 2012 to 2016") +
+  labs(x = "Year", y = "Total") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = c(0, 0), limits = c(0,1000), position = "top")
+
+# Total homicides by year and by month from 2012 to 2016
+chicago_crimes %>%
+  filter(Primary.Type == "HOMICIDE") %>%
+  group_by(Year, Month) %>%
+  summarise(Total = n()) %>%
+  ggplot(aes(Year, Month, fill = Total)) +
+  ggtitle("Total homicides by year and by month from 2012 to 2016") +
+  geom_tile(size = 1, color = "white") +
+  scale_fill_viridis()  +
+  geom_text(aes(label = Total), color = "white") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 12), expand = c(0, 0))
+
+```
+
+That is some interesting data. Even though the number of crimes in general have decreased between the years, the number of **homicides** has been approximately the same between 2012 to 2015 but have since then **hugely increased for 2016** (about a 60% increase from 2015). This is very concerning and we can see that almost all months of 2016 had a huge increase of homicides compared to the previous years.
+
+```{r}
+
+# Table of the homicides with the most deaths between 2012 and 2016
+chicago_crimes %>%
+  count(Case.Number) %>%
+  filter(n > 1) %>%
+  arrange(desc(n)) %>%
+  top_n(5) %>%
+  kable(caption = "Homicide with the most deaths between 2012 and 2016", col.names=c("Case number", "Deaths")) %>%
+  kable_styling(full_width = F, position = "center") %>%
+  row_spec(1, bold = T, color = "#B50C0C")
+
+```
+
+Finally, we can see that the homicide with the most deaths between 2012 and 2016 had **6 deaths**. I'm not sure how to interpret this number (any number of deaths is bad) and therefore I will let each reader do his own interpretation.
+
+## Conclusion
+
+The data was really interesting to study and we learned the following insights:
+
+* Most of the crimes in Chicago are relatively "small crimes". Small thefts and simple battery are a huge proportion of the crimes.
+
+* A lot of time and resources could be saved by legalizing cannabis and not having to deal with the huge numbers of crimes that consist of the possession of a small amount of cannabis.
+
+* The numbers of crimes in Chicago has actually been decreasing these last few years. The Narcotics crimes especially have decreased a lot from 2012 to 2016.
+
+* Some areas have a particularly high density of crimes.
+
+* Most of the crimes happen in the street/sidewalk or in a residence/apartment.
+
+* The nights during the weekend have a high amount of crimes.
+
+* The district 11 is particularly good to have crimes that lead to an arrest.
+
+* The homicides have increased a lot in 2016 compared to the previous years.

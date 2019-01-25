@@ -1,2 +1,2 @@
 # crime-chicago
-Data Science project in R based on real data about crime in Chicago
+Data Science project in R on crime in Chicago
